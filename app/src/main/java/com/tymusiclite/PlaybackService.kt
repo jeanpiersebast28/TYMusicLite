@@ -276,7 +276,6 @@ class PlaybackService : Service() {
         private const val EXTRA_ACTION = "action"
         private const val CHANNEL_ID = "playback"
         private const val NOTIFICATION_ID = 1
-        private const val STOP_DEBOUNCE_MS = 800L
         private const val MAX_ARTWORK_SIZE = 512
 
         @Volatile
@@ -312,7 +311,6 @@ class PlaybackService : Service() {
         private var lastFailedArtworkUrl: String? = null
 
         private val mainHandler = Handler(Looper.getMainLooper())
-        private var pendingStop: Runnable? = null
         private var instance: PlaybackService? = null
 
         fun updateState(context: Context, playing: Boolean, title: String?) {
@@ -334,16 +332,12 @@ class PlaybackService : Service() {
                     durationMs = 0
                 }
 
-                cancelPendingStop()
-
                 if (!stateChanged && !titleChanged) return@post
 
                 ContextCompat.startForegroundService(
                     appContext,
                     Intent(appContext, PlaybackService::class.java),
                 )
-
-                if (!playing) scheduleStop(appContext)
             }
         }
 
@@ -446,22 +440,9 @@ class PlaybackService : Service() {
 
         fun stopNow(context: Context) {
             mainHandler.post {
-                cancelPendingStop()
                 val appContext = context.applicationContext
                 appContext.stopService(Intent(appContext, PlaybackService::class.java))
             }
-        }
-
-        private fun scheduleStop(context: Context) {
-            val appContext = context.applicationContext
-            pendingStop = Runnable {
-                appContext.stopService(Intent(appContext, PlaybackService::class.java))
-            }.also { mainHandler.postDelayed(it, STOP_DEBOUNCE_MS) }
-        }
-
-        private fun cancelPendingStop() {
-            pendingStop?.let { mainHandler.removeCallbacks(it) }
-            pendingStop = null
         }
     }
 }

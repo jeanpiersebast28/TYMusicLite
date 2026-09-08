@@ -11,7 +11,7 @@ android {
         applicationId = "com.tymusiclite"
         minSdk = 24
         targetSdk = 37
-        versionCode = 7
+        versionCode = 8
         versionName = "2.6"
     }
 

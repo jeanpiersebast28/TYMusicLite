@@ -4,6 +4,7 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
@@ -11,7 +12,9 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.Message
+import android.provider.Settings
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
@@ -47,11 +50,19 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,10 +73,20 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.FileProvider
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import java.io.ByteArrayInputStream
+import java.io.File
+import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import org.json.JSONObject
 
 private const val TAG = "TYMusicLite"
 private val DARK_BACKGROUND = Color(0xFF0D0D0D)
@@ -98,6 +119,19 @@ private fun isAdUrl(uri: Uri): Boolean {
 }
 
 private const val MUSIC_URL = "https://music.youtube.com"
+
+private const val CURRENT_BUILD_CODE = 1
+private const val UPDATES_MANIFEST_URL =
+    "https://raw.githubusercontent.com/jeanpiersebast28/TYMusicLite/main/updates/latest.json"
+private const val UPDATE_APK_URL =
+    "https://github.com/jeanpiersebast28/TYMusicLite/releases/download/v2.6/TYMusicLite2.6.apk"
+private const val REMIND_LATER_MS = 24L * 60 * 60 * 1000
+
+private data class UpdateInfo(
+    val buildCode: Int,
+    val versionName: String,
+    val notes: String,
+)
 
 private const val VISIBILITY_SPOOF_JS = """
     (function() {
@@ -676,6 +710,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         currentActivity = this
         PlaybackService.clearTaskRemoved()
+        recordAppliedBuild()
         requestNotificationPermissionIfNeeded()
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(scrim = 0),
@@ -695,6 +730,7 @@ class MainActivity : ComponentActivity() {
                     contentReady = WebViewHolder.pageLoaded.value,
                     backgroundColor = DARK_BACKGROUND,
                 )
+                UpdateOverlay()
             }
         }
     }
@@ -792,7 +828,18 @@ class MainActivity : ComponentActivity() {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1001)
         }
     }
+
+    private fun recordAppliedBuild() {
+        val prefs = getSharedPreferences(PREFS_UPDATE, MODE_PRIVATE)
+        if (prefs.getInt(PREF_BUILD_CODE, 0) != CURRENT_BUILD_CODE) {
+            prefs.edit().putInt(PREF_BUILD_CODE, CURRENT_BUILD_CODE).apply()
+        }
+    }
 }
+
+private const val PREFS_UPDATE = "update"
+private const val PREF_BUILD_CODE = "applied_build_code"
+private const val PREF_REMIND_TS = "remind_later_ts"
 
 object WebViewHolder {
     @Volatile
@@ -1089,4 +1136,212 @@ private fun createMusicWebView(
     }
     webView.loadUrl(MUSIC_URL)
     return webView
+}
+
+private sealed interface UpdateUiState {
+    data object Idle : UpdateUiState
+    data class Ready(val info: UpdateInfo) : UpdateUiState
+    data object Downloading : UpdateUiState
+    data class ReadyToInstall(val file: File) : UpdateUiState
+    data object Error : UpdateUiState
+}
+
+@Composable
+private fun UpdateOverlay() {
+    val context = LocalContext.current
+    val activity = context as? Activity
+    val scope = rememberCoroutineScope()
+    var state by remember { mutableStateOf<UpdateUiState>(UpdateUiState.Idle) }
+    var progress by remember { mutableFloatStateOf(0f) }
+
+    LaunchedEffect(Unit) {
+        val prefs = context.getSharedPreferences(PREFS_UPDATE, Context.MODE_PRIVATE)
+        if (prefs.getLong(PREF_REMIND_TS, 0L) > System.currentTimeMillis()) return@LaunchedEffect
+        val appliedBuild = prefs.getInt(PREF_BUILD_CODE, 0)
+        val info = withTimeoutOrNull(15000) {
+            withContext(Dispatchers.IO) { fetchUpdateInfo() }
+        }
+        if (info != null && info.buildCode > appliedBuild) {
+            state = UpdateUiState.Ready(info)
+        }
+    }
+
+    when (val current = state) {
+        UpdateUiState.Idle, UpdateUiState.Error -> Unit
+        is UpdateUiState.Ready -> UpdateDialog(
+            info = current.info,
+            onConfirm = {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                    !context.packageManager.canRequestPackageInstalls()
+                ) {
+                    context.startActivity(
+                        Intent(
+                            Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                            Uri.parse("package:${context.packageName}"),
+                        ),
+                    )
+                }
+                state = UpdateUiState.Downloading
+                progress = 0f
+                scope.launch {
+                    val result = withContext(Dispatchers.IO) {
+                        downloadApkUpdate(context) { value ->
+                            activity?.runOnUiThread { progress = value }
+                        }
+                    }
+                    state = if (result != null) {
+                        UpdateUiState.ReadyToInstall(result)
+                    } else {
+                        Log.w(TAG, "Resultado nulo al descargar la actualización")
+                        UpdateUiState.Error
+                    }
+                }
+            },
+            onLater = {
+                context.getSharedPreferences(PREFS_UPDATE, Context.MODE_PRIVATE)
+                    .edit()
+                    .putLong(PREF_REMIND_TS, System.currentTimeMillis())
+                    .apply()
+                state = UpdateUiState.Idle
+            },
+        )
+        UpdateUiState.Downloading -> DownloadingDialog(progress = progress)
+        is UpdateUiState.ReadyToInstall -> {
+            LaunchedEffect(current.file) {
+                installApk(context, current.file)
+                state = UpdateUiState.Idle
+            }
+        }
+    }
+}
+
+@Composable
+private fun UpdateDialog(
+    info: UpdateInfo,
+    onConfirm: () -> Unit,
+    onLater: () -> Unit,
+) {
+    MaterialTheme(colorScheme = darkColorScheme()) {
+        AlertDialog(
+            onDismissRequest = onLater,
+            title = { Text("Nueva versión disponible") },
+            text = {
+                Text(
+                    if (info.notes.isBlank()) {
+                        "Hay una actualización disponible (${info.versionName})."
+                    } else {
+                        info.notes
+                    },
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = onConfirm) { Text("Descargar") }
+            },
+            dismissButton = {
+                TextButton(onClick = onLater) { Text("Más tarde") }
+            },
+        )
+    }
+}
+
+@Composable
+private fun DownloadingDialog(progress: Float) {
+    MaterialTheme(colorScheme = darkColorScheme()) {
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("Descargando actualización") },
+            text = { LinearProgressIndicator(progress = { progress }) },
+            confirmButton = {},
+        )
+    }
+}
+
+private fun fetchUpdateInfo(): UpdateInfo? {
+    return try {
+        val conn = URL(UPDATES_MANIFEST_URL).openConnection() as HttpURLConnection
+        conn.connectTimeout = 8000
+        conn.readTimeout = 8000
+        conn.requestMethod = "GET"
+        if (conn.responseCode !in 200..299) {
+            conn.disconnect()
+            return null
+        }
+        val body = conn.inputStream.bufferedReader().use { it.readText() }
+        conn.disconnect()
+        val json = JSONObject(body)
+        UpdateInfo(
+            buildCode = json.getInt("buildCode"),
+            versionName = json.getString("versionName"),
+            notes = json.optString("notes", ""),
+        )
+    } catch (e: Exception) {
+        Log.w(TAG, "Falló la comprobación de actualización", e)
+        null
+    }
+}
+
+private fun downloadApkUpdate(
+    context: Context,
+    onProgress: (Float) -> Unit,
+): File? {
+    return try {
+        val conn = URL(UPDATE_APK_URL).openConnection() as HttpURLConnection
+        conn.connectTimeout = 15000
+        conn.readTimeout = 15000
+        conn.requestMethod = "GET"
+        if (conn.responseCode !in 200..299) {
+            conn.disconnect()
+            return null
+        }
+        val contentLength = conn.contentLengthLong
+        val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+            ?: context.filesDir
+        val file = File(dir, "update.apk")
+        val out = FileOutputStream(file)
+        val input = conn.inputStream
+        val buf = ByteArray(8192)
+        var totalRead = 0L
+        try {
+            while (true) {
+                val read = input.read(buf)
+                if (read == -1) break
+                out.write(buf, 0, read)
+                totalRead += read
+                if (contentLength > 0) {
+                    onProgress((totalRead.toFloat() / contentLength).coerceIn(0f, 1f))
+                }
+            }
+        } finally {
+            input.close()
+            out.close()
+            conn.disconnect()
+        }
+        if (contentLength > 0 && totalRead != contentLength) {
+            file.delete()
+            null
+        } else {
+            file
+        }
+    } catch (e: Exception) {
+        Log.w(TAG, "Falló la descarga de la actualización", e)
+        null
+    }
+}
+
+private fun installApk(context: Context, file: File) {
+    try {
+        val uri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            file,
+        )
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
+    } catch (e: Exception) {
+        Log.w(TAG, "Falló al abrir el instalador", e)
+    }
 }
