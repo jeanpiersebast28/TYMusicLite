@@ -1,7 +1,7 @@
 {
-  "buildCode": 2,
+  "buildCode": 3,
   "versionName": "2.7",
   "apkUrl": "https://github.com/jeanpiersebast28/TYMusicLite/releases/download/v2.7/TYMusicLite2.7.apk",
-  "size": 11942372,
-  "notes": "Nueva versión 2.7: se oculta la opción de obtener Premium en el menú de la cuenta."
+  "size": 11942368,
+  "notes": "Nueva versión 2.7: se oculta la opción de obtener Premium en el menú de la cuenta y se corrige la actualización automática."
 }

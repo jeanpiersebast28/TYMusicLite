@@ -120,7 +120,7 @@ private fun isAdUrl(uri: Uri): Boolean {
 
 private const val MUSIC_URL = "https://music.youtube.com"
 
-private const val CURRENT_BUILD_CODE = 2
+private const val CURRENT_BUILD_CODE = 3
 private const val UPDATES_MANIFEST_URL =
     "https://raw.githubusercontent.com/jeanpiersebast28/TYMusicLite/main/updates/latest.json"
 private const val UPDATE_APK_URL =
@@ -131,6 +131,7 @@ private data class UpdateInfo(
     val buildCode: Int,
     val versionName: String,
     val notes: String,
+    val apkUrl: String?,
 )
 
 private const val VISIBILITY_SPOOF_JS = """
@@ -1213,7 +1214,7 @@ private fun UpdateOverlay() {
                 progress = 0f
                 scope.launch {
                     val result = withContext(Dispatchers.IO) {
-                        downloadApkUpdate(context) { value ->
+                        downloadApkUpdate(context, current.info.apkUrl ?: UPDATE_APK_URL) { value ->
                             activity?.runOnUiThread { progress = value }
                         }
                     }
@@ -1301,6 +1302,7 @@ private fun fetchUpdateInfo(): UpdateInfo? {
             buildCode = json.getInt("buildCode"),
             versionName = json.getString("versionName"),
             notes = json.optString("notes", ""),
+            apkUrl = json.optString("apkUrl", "").takeIf { it.isNotBlank() },
         )
     } catch (e: Exception) {
         Log.w(TAG, "Falló la comprobación de actualización", e)
@@ -1310,10 +1312,11 @@ private fun fetchUpdateInfo(): UpdateInfo? {
 
 private fun downloadApkUpdate(
     context: Context,
+    apkUrl: String,
     onProgress: (Float) -> Unit,
 ): File? {
     return try {
-        val conn = URL(UPDATE_APK_URL).openConnection() as HttpURLConnection
+        val conn = URL(apkUrl).openConnection() as HttpURLConnection
         conn.connectTimeout = 15000
         conn.readTimeout = 15000
         conn.requestMethod = "GET"
