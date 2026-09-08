@@ -120,11 +120,11 @@ private fun isAdUrl(uri: Uri): Boolean {
 
 private const val MUSIC_URL = "https://music.youtube.com"
 
-private const val CURRENT_BUILD_CODE = 1
+private const val CURRENT_BUILD_CODE = 2
 private const val UPDATES_MANIFEST_URL =
     "https://raw.githubusercontent.com/jeanpiersebast28/TYMusicLite/main/updates/latest.json"
 private const val UPDATE_APK_URL =
-    "https://github.com/jeanpiersebast28/TYMusicLite/releases/download/v2.6/TYMusicLite2.6.apk"
+    "https://github.com/jeanpiersebast28/TYMusicLite/releases/download/v2.7/TYMusicLite2.7.apk"
 private const val REMIND_LATER_MS = 24L * 60 * 60 * 1000
 
 private data class UpdateInfo(
@@ -534,6 +534,34 @@ private const val HIDE_OPEN_APP_PROMO_JS = """
         new MutationObserver(function() {
             clearTimeout(window.__tyKillTimer);
             window.__tyKillTimer = setTimeout(kill, 300);
+        }).observe(document.documentElement, { childList: true, subtree: true });
+    })();
+"""
+
+private const val HIDE_PREMIUM_UPSELL_JS = """
+    (function() {
+        if (window.__tyHidePremium) return;
+        window.__tyHidePremium = true;
+        var rePremium = /(obt[ée]n|obtener|get|try|conseguir|obtain|canjear|redeem|solicit|unete|unirse|subscribe|suscribete|suscribirse)\b.{0,60}premium\b/i;
+        var kill = function() {
+            try {
+                var els = document.querySelectorAll('a,button,[role="button"],tp-yt-paper-item,td-element,[class*="guide-entry"],[class*="menu-item"],[class*="menu-content"]');
+                for (var i = 0; i < els.length; i++) {
+                    var el = els[i];
+                    if (el.__tyHiddenPremium) continue;
+                    var t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+                    if (t && t.length < 120 && rePremium.test(t)) {
+                        el.__tyHiddenPremium = true;
+                        el.style.display = 'none';
+                    }
+                }
+            } catch (e) {}
+        };
+        kill();
+        setInterval(kill, 1500);
+        new MutationObserver(function() {
+            clearTimeout(window.__tyPremiumTimer);
+            window.__tyPremiumTimer = setTimeout(kill, 300);
         }).observe(document.documentElement, { childList: true, subtree: true });
     })();
 """
@@ -1077,7 +1105,7 @@ private fun createMusicWebView(
             webView,
             VISIBILITY_SPOOF_JS + AD_BLOCK_JS + TAP_HIGHLIGHT_JS + APP_PROMO_CSS +
                 HIDE_OPEN_APP_PROMO_JS + PLAYER_VISIBILITY_JS + AUTO_CONTINUE_JS +
-                PLAYER_ARTIST_LINK_JS,
+                PLAYER_ARTIST_LINK_JS + HIDE_PREMIUM_UPSELL_JS,
             setOf("https://music.youtube.com"),
         )
         WebViewCompat.addDocumentStartJavaScript(
