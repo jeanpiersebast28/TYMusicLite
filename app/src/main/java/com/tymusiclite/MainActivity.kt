@@ -120,7 +120,7 @@ private fun isAdUrl(uri: Uri): Boolean {
 
 private const val MUSIC_URL = "https://music.youtube.com"
 
-private const val CURRENT_BUILD_CODE = 3
+private const val CURRENT_BUILD_CODE = 4
 private const val UPDATES_MANIFEST_URL =
     "https://raw.githubusercontent.com/jeanpiersebast28/TYMusicLite/main/updates/latest.json"
 private const val UPDATE_APK_URL =
@@ -367,7 +367,7 @@ private const val MEDIA_HOOK_JS = """
         var reportPlaying = function(playing) {
             try { AndroidBridge.setPlaying(playing ? '1' : '0'); } catch (e) {}
         };
-        ['play', 'pause', 'ended'].forEach(function(evt) {
+        ['play', 'playing', 'pause', 'ended'].forEach(function(evt) {
             document.addEventListener(evt, function(e) {
                 var t = e.target;
                 if (t && (t.tagName === 'VIDEO' || t.tagName === 'AUDIO')) {
@@ -463,11 +463,36 @@ private const val MEDIA_HOOK_JS = """
 
 private const val COMMAND_PLAY_PAUSE_JS = """
     (function() {
+        var v = document.querySelector('video,audio');
+        var playing = !!(v && !v.paused && !v.ended);
+        if (playing) {
+            try { v.pause(); } catch (e) {}
+            return;
+        }
         var b = document.querySelector('ytmusic-player-bar #play-pause-button') ||
                 document.querySelector('#play-pause-button');
         if (b) { b.click(); return; }
+        if (v) { try { v.play(); } catch (e) {} }
+    })();
+"""
+
+private const val COMMAND_PLAY_JS = """
+    (function() {
         var v = document.querySelector('video,audio');
-        if (v) { if (v.paused) { v.play(); } else { v.pause(); } }
+        if (v) {
+            if (v.paused || v.ended) { try { v.play(); } catch (e) {} }
+            return;
+        }
+        var b = document.querySelector('ytmusic-player-bar #play-pause-button') ||
+                document.querySelector('#play-pause-button');
+        if (b) { b.click(); }
+    })();
+"""
+
+private const val COMMAND_PAUSE_JS = """
+    (function() {
+        var v = document.querySelector('video,audio');
+        if (v && !v.paused && !v.ended) { try { v.pause(); } catch (e) {} }
     })();
 """
 
@@ -1010,6 +1035,8 @@ fun runWebViewCommand(command: String) {
         }
         val script = when (command) {
             PlaybackService.COMMAND_PLAY_PAUSE -> COMMAND_PLAY_PAUSE_JS
+            PlaybackService.COMMAND_PLAY -> COMMAND_PLAY_JS
+            PlaybackService.COMMAND_PAUSE -> COMMAND_PAUSE_JS
             PlaybackService.COMMAND_NEXT -> COMMAND_NEXT_JS
             PlaybackService.COMMAND_PREVIOUS -> COMMAND_PREVIOUS_JS
             PlaybackService.COMMAND_PAUSE_MEDIA -> COMMAND_PAUSE_MEDIA_JS

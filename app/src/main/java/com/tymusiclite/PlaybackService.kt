@@ -76,7 +76,7 @@ class PlaybackService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.getStringExtra(EXTRA_ACTION)) {
-            ACTION_PLAY_PAUSE -> runWebViewCommand(COMMAND_PLAY_PAUSE)
+            ACTION_PLAY_PAUSE -> runWebViewCommand(if (isPlaying) COMMAND_PAUSE else COMMAND_PLAY)
             ACTION_NEXT -> runWebViewCommand(COMMAND_NEXT)
             ACTION_PREVIOUS -> runWebViewCommand(COMMAND_PREVIOUS)
         }
@@ -120,9 +120,7 @@ class PlaybackService : Service() {
     }
 
     private fun onCommandExpectingState(targetPlaying: Boolean) {
-        if (isPlaying != targetPlaying) {
-            runWebViewCommand(COMMAND_PLAY_PAUSE)
-        }
+        runWebViewCommand(if (targetPlaying) COMMAND_PLAY else COMMAND_PAUSE)
     }
 
     private fun promoteToForeground() {
@@ -260,6 +258,8 @@ class PlaybackService : Service() {
         const val ACTION_NEXT = "com.tymusiclite.action.NEXT"
         const val ACTION_PREVIOUS = "com.tymusiclite.action.PREVIOUS"
         const val COMMAND_PLAY_PAUSE = "play_pause"
+        const val COMMAND_PLAY = "play"
+        const val COMMAND_PAUSE = "pause"
         const val COMMAND_NEXT = "next"
         const val COMMAND_PREVIOUS = "previous"
         const val COMMAND_SEEK_PREFIX = "seek:"
