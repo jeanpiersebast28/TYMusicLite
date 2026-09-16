@@ -9,4 +9,5 @@
     <string name="action_pause">Pausar</string>
     <string name="action_next">Siguiente</string>
     <string name="action_previous">Anterior</string>
+    <string name="share_title">Compartir en TYMusic lite</string>
 </resources>

@@ -118,9 +118,50 @@ private fun isAdUrl(uri: Uri): Boolean {
     return AD_URL_PATTERNS.any { url.contains(it) }
 }
 
+private fun isShareTarget(uri: Uri): Boolean {
+    val scheme = uri.scheme?.lowercase()
+    if (scheme == "mailto" || scheme == "sms") return true
+    val host = uri.host?.lowercase()?.removePrefix("www.") ?: return false
+    val path = uri.path?.lowercase() ?: ""
+    return when (host) {
+        "x.com", "twitter.com" -> true
+        "whatsapp.com", "api.whatsapp.com", "wa.me" -> true
+        "facebook.com" -> path.contains("sharer") || path.contains("share")
+        "reddit.com" -> path.contains("/submit")
+        "pinterest.com" -> path.contains("create")
+        "linkedin.com" -> path.contains("sharearticle") || path.contains("feed/share")
+        "t.me", "telegram.me" -> path.contains("/share")
+        else -> false
+    }
+}
+
+private fun shareTargetText(href: String): String {
+    return try {
+        val uri = Uri.parse(href)
+        val param = uri.getQueryParameter("url") ?: uri.getQueryParameter("text") ?: uri.getQueryParameter("u")
+        if (param != null && param.contains("youtube.com", ignoreCase = true)) Uri.decode(param) else href
+    } catch (e: Exception) {
+        href
+    }
+}
+
+private fun openNativeShare(context: Context, text: String) {
+    val send = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_TEXT, text)
+    }
+    val activity = MainActivity.currentActivity
+    if (activity != null) {
+        activity.startActivity(Intent.createChooser(send, activity.getString(R.string.share_title)))
+    } else {
+        val chooser = Intent.createChooser(send, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(chooser)
+    }
+}
+
 private const val MUSIC_URL = "https://music.youtube.com"
 
-private const val CURRENT_BUILD_CODE = 4
+private const val CURRENT_BUILD_CODE = 6
 private const val UPDATES_MANIFEST_URL =
     "https://raw.githubusercontent.com/jeanpiersebast28/TYMusicLite/main/updates/latest.json"
 private const val UPDATE_APK_URL =
@@ -173,7 +214,7 @@ private const val AD_BLOCK_JS = """
     (function() {
         if (window.__tyAdBlock) return;
         window.__tyAdBlock = true;
-        var AD_KEYS = ['adPlacements', 'adSlots', 'playerAds', 'adBreaks'];
+        var AD_KEYS = ['adPlacements', 'adSlots', 'playerAds', 'adBreaks', 'adBreakParams', 'adPlaybackData', 'adsPlaybackData', 'adDurationMillis', 'midrollAds', 'adInfo', 'adParams'];
         var stripCount = 0;
         var stripAdNodes = function(node) {
             if (!node || typeof node !== 'object') return;
@@ -193,10 +234,7 @@ private const val AD_BLOCK_JS = """
         };
         var hasAdKeys = function(text) {
             return typeof text === 'string' && (
-                text.indexOf('"adPlacements"') !== -1 ||
-                text.indexOf('"adSlots"') !== -1 ||
-                text.indexOf('"playerAds"') !== -1 ||
-                text.indexOf('"adBreaks"') !== -1
+                AD_KEYS.some(function(k) { return text.indexOf('"' + k + '"') !== -1; })
             );
         };
         try {
@@ -229,33 +267,85 @@ private const val AD_BLOCK_JS = """
         JSON.parse = function(text, reviver) {
             var data = originalJsonParse.apply(this, arguments);
             try {
-                if (hasAdKeys(text)) {
-                    var before = stripCount;
+                if (typeof text === 'string' && hasAdKeys(text)) {
                     stripAdNodes(data);
                 }
             } catch (e) {}
             return data;
         };
+
+        var adBadgeVisible = function() {
+            try {
+                var badges = document.querySelectorAll('ytmusic-player-bar .badge-style-type-ad-stark, .ytp-ad-badge');
+                for (var i = 0; i < badges.length; i++) {
+                    var r = badges[i].getBoundingClientRect();
+                    if (r.width > 0 && getComputedStyle(badges[i]).visibility !== 'hidden') return true;
+                }
+            } catch (e) {}
+            return false;
+        };
+        var clickSkip = function() {
+            var sel = '.ytp-ad-skip-button, .ytp-skip-ad-button, .ytp-ad-skip-button-slot, .ytp-ad-skip-button-modern, ytmusic-player .ytp-ad-skip-button, .ytp-ad-overlay-close-button';
+            var nodes = document.querySelectorAll(sel);
+            for (var i = 0; i < nodes.length; i++) {
+                try {
+                    if (getComputedStyle(nodes[i]).display !== 'none') { nodes[i].click(); }
+                } catch (e) {}
+            }
+        };
+        var hideFeedAds = function() {
+            try {
+                var ads = document.querySelectorAll('ytd-display-ad-renderer, ytd-in-feed-ad-layout-renderer, ytd-ad-slot-renderer, #player-ads');
+                for (var i = 0; i < ads.length; i++) {
+                    if (ads[i].id !== 'movie_player') {
+                        var el = ads[i];
+                        el.style.display = 'none';
+                        el.style.visibility = 'hidden';
+                        if (el.parentNode && el.parentNode.tagName === 'TP-YT-PAPER-DIALOG') {
+                            try { el.parentNode.remove(); } catch (e) {}
+                        }
+                    }
+                }
+            } catch (e) {}
+        };
+        var killAd = function(player, video) {
+            if (video && video.duration && isFinite(video.duration)) {
+                video.currentTime = video.duration;
+            }
+            clickSkip();
+            if (video && !video.muted) {
+                video.muted = true;
+                video.__tyMutedByUs = true;
+            }
+            try {
+                var badges = document.querySelectorAll('.badge-style-type-ad-stark');
+                for (var i = 0; i < badges.length; i++) {
+                    if (getComputedStyle(badges[i]).visibility !== 'hidden') {
+                        badges[i].style.display = 'none';
+                    }
+                }
+            } catch (e) {}
+            try {
+                if (player) player.classList.remove('ad-showing');
+                var overlays = document.querySelectorAll('.ytp-ad-player-overlay, .ytp-ad-text-overlay, .ytp-ad-overlay-slot, .video-ads, .ad-container');
+                for (var i = 0; i < overlays.length; i++) {
+                    overlays[i].style.display = 'none';
+                }
+            } catch (e) {}
+        };
         setInterval(function() {
             try {
                 var player = document.getElementById('movie_player');
                 var adShowing = player && player.classList.contains('ad-showing');
+                var isAd = adShowing || adBadgeVisible();
                 var video = document.querySelector('video');
-                if (adShowing) {
-                    if (video && video.duration && isFinite(video.duration)) {
-                        video.currentTime = video.duration;
-                    }
-                    var skipBtn = document.querySelector('.ytp-ad-skip-button, .ytp-skip-ad-button, .ytp-ad-skip-button-slot');
-                    if (skipBtn) { skipBtn.click(); }
-                    if (video && !video.muted) {
-                        video.muted = true;
-                        video.__tyMutedByUs = true;
-                    }
-                    player.classList.remove('ad-showing');
+                if (isAd) {
+                    killAd(player, video);
                 } else if (video && video.__tyMutedByUs) {
                     video.muted = false;
                     video.__tyMutedByUs = false;
                 }
+                hideFeedAds();
             } catch (e) {}
         }, 150);
     })();
@@ -346,6 +436,120 @@ private const val TAP_HIGHLIGHT_JS = """
     })();
 """
 
+private const val CLOSE_SHARE_PANEL_JS = """
+    (function() {
+        try {
+            var dlg = document.querySelector('tp-yt-paper-dialog');
+            if (!dlg || dlg.getBoundingClientRect().height === 0) return 'none';
+            var targets = dlg.querySelectorAll('button,[role="button"]');
+            for (var i = 0; i < targets.length; i++) {
+                var al = (targets[i].getAttribute('aria-label') || '').toLowerCase();
+                if (al.indexOf('descart') === 0 || al.indexOf('cerrar') === 0 || al.indexOf('close') === 0 || al.indexOf('dismiss') === 0) {
+                    targets[i].click();
+                    return 'closed';
+                }
+            }
+            var panel = dlg.querySelector('yt-share-panel-renderer, ytmusic-share-panel-renderer');
+            if (panel) {
+                try {
+                    var esc = document.createEvent('KeyboardEvent');
+                    esc.initEvent('keydown', true, true);
+                    Object.defineProperty(esc, 'key', { get: function() { return 'Escape'; } });
+                    dlg.dispatchEvent(esc);
+                    return 'esc';
+                } catch (e) {}
+            }
+            try { dlg.remove(); } catch (e) {}
+            var backdrops = document.querySelectorAll('iron-overlay-backdrop');
+            for (var i = 0; i < backdrops.length; i++) {
+                try { backdrops[i].remove(); } catch (e) {}
+            }
+            return 'removed';
+        } catch (e) { return 'err'; }
+    })();
+"""
+
+private const val SHARE_HIJACK_JS = """
+    (function() {
+        if (window.__tyShareHook) return;
+        window.__tyShareHook = true;
+        var shareTo = function(text) {
+            try { if (text) AndroidBridge.shareUrl(String(text)); } catch (e) {}
+            setTimeout(function() {
+                try {
+                    var dlg = document.querySelector('tp-yt-paper-dialog');
+                    if (dlg && dlg.getBoundingClientRect().height > 0) {
+                        var btns = dlg.querySelectorAll('button,[role="button"]');
+                        for (var i = 0; i < btns.length; i++) {
+                            var al = (btns[i].getAttribute('aria-label') || '').toLowerCase();
+                            if (al.indexOf('descart') === 0 || al.indexOf('cerrar') === 0 || al.indexOf('close') === 0 || al.indexOf('dismiss') === 0) {
+                                btns[i].click();
+                                return;
+                            }
+                        }
+                    }
+                } catch (e) {}
+            }, 250);
+        };
+        var canonicalShare = function() {
+            try {
+                var pr = window.ytInitialPlayerResponse || window.__tyLastPlayerResponse;
+                if (pr && pr.videoDetails && pr.videoDetails.videoId) {
+                    return 'https://music.youtube.com/watch?v=' + pr.videoDetails.videoId;
+                }
+            } catch (e) {}
+            return window.location.href.split('#')[0];
+        };
+        var isShareLink = function(href) {
+            try {
+                if (/^(mailto|sms|tel):/.test(href)) return true;
+                var u = new URL(href);
+                var host = u.hostname.replace(/^www\./, '');
+                var path = u.pathname;
+                if (host === 'x.com' || host === 'twitter.com') return /\/intent\//.test(path);
+                if (host === 'whatsapp.com' || host === 'api.whatsapp.com' || host === 'wa.me') return true;
+                if (host === 'facebook.com') return /(sharer|share\.php|dialog\/share|\/share)/.test(path);
+                if (host === 'reddit.com') return /\/submit/.test(path);
+                if (host === 'pinterest.com') return /\/pin\/create/.test(path);
+                if (host === 'linkedin.com') return /(shareArticle|feed\/share)/.test(path);
+                if (host === 't.me' || host === 'telegram.me') return /\/share/.test(path);
+            } catch (e) {}
+            return false;
+        };
+        var findShareHref = function(el) {
+            var node = el;
+            while (node && node !== document) {
+                if (node.tagName === 'A' && node.href && isShareLink(node.href)) return node.href;
+                node = node.parentElement;
+            }
+            try {
+                var tile = el.closest('yt-share-target-renderer, ytmusic-share-target-renderer, yt-tile-share-renderer');
+                if (tile) {
+                    var a = tile.querySelector('a[href]');
+                    if (a && isShareLink(a.href)) return a.href;
+                }
+            } catch (e) {}
+            return null;
+        };
+        document.addEventListener('click', function(e) {
+            var href = findShareHref(e.target);
+            if (href) {
+                e.preventDefault();
+                e.stopPropagation();
+                shareTo(canonicalShare());
+            }
+        }, true);
+        try {
+            if (typeof navigator.share === 'function') {
+                navigator.share = function(data) {
+                    shareTo(canonicalShare());
+                    return Promise.resolve();
+                };
+            }
+        } catch (e) {}
+    })();
+"""
+
 private const val MEDIA_HOOK_JS = """
     (function() {
         if (window.__tyHooked) return;
@@ -371,7 +575,8 @@ private const val MEDIA_HOOK_JS = """
             document.addEventListener(evt, function(e) {
                 var t = e.target;
                 if (t && (t.tagName === 'VIDEO' || t.tagName === 'AUDIO')) {
-                    reportPlaying(evt === 'play');
+                    if (evt === 'play' || evt === 'playing') { window.__tyExplicitPause = false; }
+                    reportPlaying(evt === 'play' || evt === 'playing');
                 }
             }, true);
         });
@@ -461,38 +666,114 @@ private const val MEDIA_HOOK_JS = """
     })();
 """
 
+private const val PLAYER_API_JS = """
+    (function() {
+        if (window.__tyPlayerApi) return;
+        var P = window.__tyPlayerApi = {};
+        P.getApi = function() {
+            try {
+                var a = document.querySelector('ytmusic-app');
+                if (a && a.playerApi) return a.playerApi;
+            } catch (e) {}
+            try {
+                var b = document.querySelector('ytmusic-player-bar');
+                if (b && b.playerApi) return b.playerApi;
+            } catch (e) {}
+            return null;
+        };
+        P.getMovie = function() {
+            try { return document.getElementById('movie_player'); } catch (e) { return null; }
+        };
+        P.getVideo = function() {
+            try { return document.querySelector('video,audio'); } catch (e) { return null; }
+        };
+        P.stat = function() {
+            try {
+                var a = P.getApi();
+                if (a && typeof a.getPlayerState === 'function') {
+                    var s = a.getPlayerState();
+                    if (s === 1 || s === 2 || s === 5) return s;
+                }
+            } catch (e) {}
+            try {
+                var m = P.getMovie();
+                if (m && typeof m.getPlayerState === 'function') {
+                    var s2 = m.getPlayerState();
+                    if (s2 === 1 || s2 === 2 || s2 === 5) return s2;
+                }
+            } catch (e) {}
+            var v = P.getVideo();
+            if (v) return (v.paused || v.ended) ? 2 : 1;
+            return 5;
+        };
+        P.pause = function() {
+            try {
+                var a = P.getApi();
+                if (a && typeof a.pauseVideo === 'function') { a.pauseVideo(); return; }
+            } catch (e) {}
+            try {
+                var m = P.getMovie();
+                if (m && typeof m.pauseVideo === 'function') { m.pauseVideo(); return; }
+            } catch (e) {}
+            var v = P.getVideo();
+            if (v && !v.paused && !v.ended) { try { v.pause(); } catch (e) {} }
+        };
+        P.play = function() {
+            try {
+                var a = P.getApi();
+                if (a && typeof a.playVideo === 'function') { a.playVideo(); return; }
+            } catch (e) {}
+            try {
+                var m = P.getMovie();
+                if (m && typeof m.playVideo === 'function') { m.playVideo(); return; }
+            } catch (e) {}
+            var v = P.getVideo();
+            if (v && (v.paused || v.ended)) { try { v.play(); } catch (e) {} return; }
+            var b = document.querySelector('ytmusic-player-bar #play-pause-button') ||
+                    document.querySelector('#play-pause-button');
+            if (b) b.click();
+        };
+        P.seek = function(sec) {
+            try {
+                var a = P.getApi();
+                if (a && typeof a.seekTo === 'function') { a.seekTo(sec); return; }
+            } catch (e) {}
+            try {
+                var m = P.getMovie();
+                if (m && typeof m.seekTo === 'function') { m.seekTo(sec, true); return; }
+            } catch (e) {}
+            var v = P.getVideo();
+            if (v && isFinite(v.duration)) { v.currentTime = sec; }
+        };
+    })();
+"""
+
 private const val COMMAND_PLAY_PAUSE_JS = """
     (function() {
-        var v = document.querySelector('video,audio');
-        var playing = !!(v && !v.paused && !v.ended);
-        if (playing) {
-            try { v.pause(); } catch (e) {}
-            return;
+        if (window.__tyPlayerApi.stat() === 1) {
+            window.__tyExplicitPause = true;
+            window.__tyPlayerApi.pause();
+        } else {
+            window.__tyExplicitPause = false;
+            window.__tyPlayerApi.play();
         }
-        var b = document.querySelector('ytmusic-player-bar #play-pause-button') ||
-                document.querySelector('#play-pause-button');
-        if (b) { b.click(); return; }
-        if (v) { try { v.play(); } catch (e) {} }
     })();
 """
 
 private const val COMMAND_PLAY_JS = """
     (function() {
-        var v = document.querySelector('video,audio');
-        if (v) {
-            if (v.paused || v.ended) { try { v.play(); } catch (e) {} }
-            return;
-        }
-        var b = document.querySelector('ytmusic-player-bar #play-pause-button') ||
-                document.querySelector('#play-pause-button');
-        if (b) { b.click(); }
+        window.__tyExplicitPause = false;
+        if (window.__tyPlayerApi.stat() === 1) return;
+        window.__tyPlayerApi.play();
     })();
 """
 
 private const val COMMAND_PAUSE_JS = """
     (function() {
-        var v = document.querySelector('video,audio');
-        if (v && !v.paused && !v.ended) { try { v.pause(); } catch (e) {} }
+        if (window.__tyPlayerApi.stat() === 1) {
+            window.__tyExplicitPause = true;
+            window.__tyPlayerApi.pause();
+        }
     })();
 """
 
@@ -633,9 +914,10 @@ private const val CLOSE_PLAYER_JS = """
 
 private const val COMMAND_PAUSE_MEDIA_JS = """
     (function() {
-        var v = document.querySelector('video,audio');
-        if (v && !v.paused) { v.pause(); return 'paused'; }
-        return 'already-paused';
+        if (window.__tyPlayerApi.stat() === 1) {
+            window.__tyExplicitPause = true;
+            window.__tyPlayerApi.pause();
+        }
     })();
 """
 
@@ -657,6 +939,11 @@ private const val AUTO_CONTINUE_JS = """
         var dismiss = function() {
             var done = false;
             var expr = /(todav|a[u\u00fa]n|still|continue|continuar|seguir|continuas|yes|s[i\u00ed]|keep|de acuerdo|ok|siguiente)/i;
+            var openDialog = false;
+            try {
+                var anyDlg = document.querySelector('tp-yt-paper-dialog');
+                openDialog = !!anyDlg && anyDlg.getBoundingClientRect().height > 0;
+            } catch (e) {}
             var selectors = [
                 'yt-confirm-dialog-renderer button[aria-label]',
                 'yt-confirm-dialog-renderer button',
@@ -674,7 +961,11 @@ private const val AUTO_CONTINUE_JS = """
                     var el = nodes[n];
                     var label = (el.getAttribute('aria-label') || '').trim();
                     var text = (el.textContent || '').trim();
-                    if (el.tagName === 'IRON-OVERLAY-BACKDROP' || el.tagName === 'YT-CONFIRM-DIALOG-RENDERER') {
+                    if (el.tagName === 'IRON-OVERLAY-BACKDROP') {
+                        if (!openDialog) { try { el.remove(); } catch (e) {} }
+                        continue;
+                    }
+                    if (el.tagName === 'YT-CONFIRM-DIALOG-RENDERER') {
                         try { el.remove(); } catch (e) {}
                         continue;
                     }
@@ -682,9 +973,15 @@ private const val AUTO_CONTINUE_JS = """
                     if (text && text.length < 30 && expr.test(text)) { el.click(); done = true; }
                 }
             }
-            var video = document.querySelector('video,audio');
-            if (done && video && video.paused) {
-                try { video.play(); } catch (e) {}
+            if (done && !window.__tyExplicitPause) {
+                try {
+                    if (window.__tyPlayerApi) {
+                        window.__tyPlayerApi.play();
+                    } else {
+                        var v0 = document.querySelector('video,audio');
+                        if (v0 && v0.paused) { v0.play(); }
+                    }
+                } catch (e) {}
             }
             return done;
         };
@@ -757,6 +1054,22 @@ class MainActivity : ComponentActivity() {
         @JavascriptInterface
         fun setPlayerOpen(value: String) {
             WebViewHolder.playerOverlayOpen = value == "1"
+        }
+
+        @JavascriptInterface
+        fun shareUrl(value: String) {
+            val text = value.ifBlank { return }
+            runOnUiThread {
+                val send = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_TEXT, text)
+                }
+                try {
+                    startActivity(Intent.createChooser(send, getString(R.string.share_title)))
+                } catch (e: Exception) {
+                    Log.w(TAG, "share falló", e)
+                }
+            }
         }
     }
 
@@ -1024,25 +1337,27 @@ private class BackgroundSafeWebView(context: Context) : WebView(context) {
 fun runWebViewCommand(command: String) {
     val webView = WebViewHolder.webView ?: return
     webView.post {
-        if (command.startsWith(PlaybackService.COMMAND_SEEK_PREFIX)) {
-            val targetMs = command.substringAfter(':').toLongOrNull() ?: return@post
-            val seconds = targetMs / 1000.0
-            webView.evaluateJavascript(
-                "(function(){var v=document.querySelector('video,audio');if(v&&isFinite(v.duration)){v.currentTime=$seconds;}})()",
-                null,
-            )
-            return@post
+        val script = when {
+            command.startsWith(PlaybackService.COMMAND_SEEK_PREFIX) -> {
+                val targetMs = command.substringAfter(':').toLongOrNull() ?: return@post
+                val seconds = targetMs / 1000.0
+                PLAYER_API_JS + "(function(){window.__tyPlayerApi.seek($seconds);})()"
+            }
+            else -> when (command) {
+                PlaybackService.COMMAND_PLAY_PAUSE -> PLAYER_API_JS + COMMAND_PLAY_PAUSE_JS
+                PlaybackService.COMMAND_PLAY -> PLAYER_API_JS + COMMAND_PLAY_JS
+                PlaybackService.COMMAND_PAUSE -> PLAYER_API_JS + COMMAND_PAUSE_JS
+                PlaybackService.COMMAND_NEXT -> COMMAND_NEXT_JS
+                PlaybackService.COMMAND_PREVIOUS -> COMMAND_PREVIOUS_JS
+                PlaybackService.COMMAND_PAUSE_MEDIA -> PLAYER_API_JS + COMMAND_PAUSE_MEDIA_JS
+                else -> return@post
+            }
         }
-        val script = when (command) {
-            PlaybackService.COMMAND_PLAY_PAUSE -> COMMAND_PLAY_PAUSE_JS
-            PlaybackService.COMMAND_PLAY -> COMMAND_PLAY_JS
-            PlaybackService.COMMAND_PAUSE -> COMMAND_PAUSE_JS
-            PlaybackService.COMMAND_NEXT -> COMMAND_NEXT_JS
-            PlaybackService.COMMAND_PREVIOUS -> COMMAND_PREVIOUS_JS
-            PlaybackService.COMMAND_PAUSE_MEDIA -> COMMAND_PAUSE_MEDIA_JS
-            else -> return@post
+        try {
+            webView.evaluateJavascript(script, null)
+        } catch (e: Exception) {
+            Log.w(TAG, "evaluateJavascript falló: $command", e)
         }
-        webView.evaluateJavascript(script, null)
     }
 }
 
@@ -1104,6 +1419,13 @@ private fun createMusicWebView(
                 override fun onPageStarted(popup: WebView, url: String, favicon: Bitmap?) {
                     super.onPageStarted(popup, url, favicon)
                     if (url == "about:blank") return
+                    val uri = Uri.parse(url)
+                    if (isShareTarget(uri)) {
+                        target.evaluateJavascript(CLOSE_SHARE_PANEL_JS, null)
+                        openNativeShare(view.context, shareTargetText(url))
+                        popup.post { popup.destroy() }
+                        return
+                    }
                     target.loadUrl(url)
                     popup.post { popup.destroy() }
                 }
@@ -1128,12 +1450,15 @@ private fun createMusicWebView(
 
     webView.addJavascriptInterface(bridge, "AndroidBridge")
 
+    val musicPageScripts =
+        VISIBILITY_SPOOF_JS + AD_BLOCK_JS + TAP_HIGHLIGHT_JS + APP_PROMO_CSS +
+            HIDE_OPEN_APP_PROMO_JS + PLAYER_VISIBILITY_JS + AUTO_CONTINUE_JS +
+            PLAYER_ARTIST_LINK_JS + HIDE_PREMIUM_UPSELL_JS + SHARE_HIJACK_JS
+
     if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
         WebViewCompat.addDocumentStartJavaScript(
             webView,
-            VISIBILITY_SPOOF_JS + AD_BLOCK_JS + TAP_HIGHLIGHT_JS + APP_PROMO_CSS +
-                HIDE_OPEN_APP_PROMO_JS + PLAYER_VISIBILITY_JS + AUTO_CONTINUE_JS +
-                PLAYER_ARTIST_LINK_JS + HIDE_PREMIUM_UPSELL_JS,
+            musicPageScripts,
             setOf("https://music.youtube.com"),
         )
         WebViewCompat.addDocumentStartJavaScript(
@@ -1163,6 +1488,11 @@ private fun createMusicWebView(
                 view.loadUrl(MUSIC_URL)
                 return true
             }
+            if (isShareTarget(uri)) {
+                view.evaluateJavascript(CLOSE_SHARE_PANEL_JS, null)
+                openNativeShare(view.context, shareTargetText(request.url.toString()))
+                return true
+            }
             return false
         }
 
@@ -1180,12 +1510,22 @@ private fun createMusicWebView(
             return null
         }
 
+        override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+            super.onPageStarted(view, url, favicon)
+            if (url?.startsWith("https://music.youtube.com") == true) {
+                view.evaluateJavascript(musicPageScripts, null)
+            }
+        }
+
         override fun onPageCommitVisible(view: WebView, url: String?) {
             super.onPageCommitVisible(view, url)
             WebViewHolder.pageLoaded.value = true
         }
 
         override fun onPageFinished(view: WebView, url: String?) {
+            if (url?.startsWith("https://music.youtube.com") == true) {
+                view.evaluateJavascript(musicPageScripts, null)
+            }
             view.evaluateJavascript(HIDE_OPEN_APP_PROMO_JS, null)
             view.evaluateJavascript(MEDIA_HOOK_JS, null)
         }

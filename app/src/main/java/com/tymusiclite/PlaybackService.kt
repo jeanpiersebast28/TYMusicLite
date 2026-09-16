@@ -76,7 +76,7 @@ class PlaybackService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.getStringExtra(EXTRA_ACTION)) {
-            ACTION_PLAY_PAUSE -> runWebViewCommand(if (isPlaying) COMMAND_PAUSE else COMMAND_PLAY)
+            ACTION_PLAY_PAUSE -> runWebViewCommand(COMMAND_PLAY_PAUSE)
             ACTION_NEXT -> runWebViewCommand(COMMAND_NEXT)
             ACTION_PREVIOUS -> runWebViewCommand(COMMAND_PREVIOUS)
         }

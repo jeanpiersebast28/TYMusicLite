@@ -1,7 +1,7 @@
 {
-  "buildCode": 4,
-  "versionName": "2.8",
-  "apkUrl": "https://github.com/jeanpiersebast28/TYMusicLite/releases/download/v2.8/TYMusicLite2.8.apk",
-  "size": 11942372,
-  "notes": "Nueva versión 2.8: corregido el botón de pausa (la música ya se pausa siempre desde la notificación y la pantalla de bloqueo)."
+  "buildCode": 6,
+  "versionName": "2.10",
+  "apkUrl": "https://github.com/jeanpiersebast28/TYMusicLite/releases/download/v2.10/TYMusicLite2.10.apk",
+  "size": 11942780,
+  "notes": "Nueva versión 2.10: bloqueo de anuncios reforzado. Ahora el reproductor queda a salvo de anuncios de video/audio y de los avisos 'Patrocinado': se saltan automáticamente, no se silencian tus canciones y se ocultan los anuncios del feed. También se corrigió que algunos scripts del reproductor dejaran de ejecutarse."
 }
