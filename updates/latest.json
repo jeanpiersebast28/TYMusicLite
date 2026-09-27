@@ -1,7 +1,7 @@
 {
-  "buildCode": 6,
-  "versionName": "2.10",
-  "apkUrl": "https://github.com/jeanpiersebast28/TYMusicLite/releases/download/v2.10/TYMusicLite2.10.apk",
-  "size": 11942780,
-  "notes": "Nueva versión 2.10: bloqueo de anuncios reforzado. Ahora el reproductor queda a salvo de anuncios de video/audio y de los avisos 'Patrocinado': se saltan automáticamente, no se silencian tus canciones y se ocultan los anuncios del feed. También se corrigió que algunos scripts del reproductor dejaran de ejecutarse."
+  "buildCode": 7,
+  "versionName": "2.11",
+  "apkUrl": "https://github.com/jeanpiersebast28/TYMusicLite/releases/download/v2.11/TYMusicLite2.11.apk",
+  "size": 11942526,
+  "notes": "v2.11: la barra superior deja de mostrar el logo de YouTube Music y muestra el icono y el nombre de TYMusic lite. Tocar el logo sigue llevándote al inicio. También se limpió código interno que no se usaba (tema de Compose sin invocar, estilos duplicados, recursos de color huérfanos y una rama inalcanzable por versión de Android) y se corrigieron dos avisos de lint del analizador."
 }

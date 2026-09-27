@@ -162,7 +162,7 @@ private fun openNativeShare(context: Context, text: String) {
 
 private const val MUSIC_URL = "https://music.youtube.com"
 
-private const val CURRENT_BUILD_CODE = 6
+private const val CURRENT_BUILD_CODE = 7
 private const val UPDATES_MANIFEST_URL =
     "https://raw.githubusercontent.com/jeanpiersebast28/TYMusicLite/main/updates/latest.json"
 private const val UPDATE_APK_URL =
