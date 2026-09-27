@@ -15,6 +15,7 @@ import android.os.Bundle
 import android.os.Environment
 import android.os.Message
 import android.provider.Settings
+import android.util.Base64
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
@@ -166,7 +167,6 @@ private const val UPDATES_MANIFEST_URL =
     "https://raw.githubusercontent.com/jeanpiersebast28/TYMusicLite/main/updates/latest.json"
 private const val UPDATE_APK_URL =
     "https://github.com/jeanpiersebast28/TYMusicLite/releases/download/v2.7/TYMusicLite2.7.apk"
-private const val REMIND_LATER_MS = 24L * 60 * 60 * 1000
 
 private data class UpdateInfo(
     val buildCode: Int,
@@ -793,19 +793,6 @@ private const val COMMAND_PREVIOUS_JS = """
     })();
 """
 
-private const val APP_PROMO_CSS = """
-    (function() {
-        if (window.__tyPromoCss) return;
-        window.__tyPromoCss = true;
-        try {
-            var s = document.createElement('style');
-            s.id = 'ty-hide-promo';
-            s.textContent = '.app-install-link{display:none!important}';
-            (document.head || document.documentElement).appendChild(s);
-        } catch (e) {}
-    })();
-"""
-
 private const val HIDE_OPEN_APP_PROMO_JS = """
     (function() {
         if (window.__tyHideOpenApp) return;
@@ -872,6 +859,47 @@ private const val HIDE_PREMIUM_UPSELL_JS = """
         }).observe(document.documentElement, { childList: true, subtree: true });
     })();
 """
+
+private fun brandHeaderJs(label: String, accent: String): String {
+    val svg =
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 108 108' width='28' height='28'>" +
+            "<rect width='108' height='108' rx='26' fill='$accent'/>" +
+            "<path fill='#FFFFFF' d='M42,72 a11,11 0 1,0 22,0 a11,11 0 1,0 -22,0'/>" +
+            "<path fill='#FFFFFF' d='M60,40 h5 v33 h-5 z'/>" +
+            "<path fill='#FFFFFF' d='M65,40 C59,47 50,49 43,45 C48,54 60,55 65,47 Z'/>" +
+            "</svg>"
+    val icon = Base64.encodeToString(svg.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+    val text = JSONObject.quote(label)
+    val css =
+        "ytmusic-logo{display:inline-flex!important;align-items:center!important;}" +
+            "ytmusic-logo>picture,ytmusic-logo picture,ytmusic-logo img,ytmusic-logo>svg," +
+            "ytmusic-logo .logo{display:none!important;}" +
+            "ytmusic-logo>a{display:inline-flex!important;align-items:center!important;" +
+            "text-decoration:none!important;}" +
+            "ytmusic-logo>a::after{content:$text;display:inline-block;box-sizing:content-box;" +
+            "height:28px;line-height:28px;padding-left:36px;color:#FFFFFF;" +
+            "font-family:Roboto,'Noto Sans',Arial,sans-serif;font-size:16px;font-weight:700;" +
+            "white-space:nowrap;pointer-events:none;-webkit-user-select:none;user-select:none;" +
+            "background-image:url(\"data:image/svg+xml;base64,$icon\");" +
+            "background-repeat:no-repeat;background-position:0 center;background-size:28px 28px;}"
+    val c = JSONObject.quote(css)
+    return """
+    (function() {
+        var CSS = $c;
+        var inject = function() {
+            try {
+                if (document.getElementById('ty-brand-style')) return;
+                var s = document.createElement('style');
+                s.id = 'ty-brand-style';
+                s.textContent = CSS;
+                (document.head || document.documentElement).appendChild(s);
+            } catch (e) {}
+        };
+        inject();
+        setInterval(inject, 1500);
+    })();
+"""
+}
 
 private const val PLAYER_VISIBILITY_JS = """
     (function() {
@@ -1091,7 +1119,6 @@ class MainActivity : ComponentActivity() {
             ) {
                 MusicWebView(
                     bridge = jsBridge,
-                    onWebViewReady = {},
                 )
                 SplashOverlay(
                     contentReady = WebViewHolder.pageLoaded.value,
@@ -1289,7 +1316,6 @@ private fun SplashOverlay(
 @Composable
 private fun MusicWebView(
     bridge: Any,
-    onWebViewReady: (WebView) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val activity = LocalContext.current as? Activity
@@ -1312,13 +1338,11 @@ private fun MusicWebView(
             WebViewHolder.webView?.also { existing ->
                 (existing.parent as? ViewGroup)?.removeView(existing)
                 existing.setBackgroundColor(DARK_BACKGROUND.toArgb())
-                onWebViewReady(existing)
             } ?: createMusicWebView(
                 context.applicationContext,
                 bridge,
             ).also { created ->
                 WebViewHolder.webView = created
-                onWebViewReady(created)
             }
         },
     )
@@ -1450,8 +1474,13 @@ private fun createMusicWebView(
 
     webView.addJavascriptInterface(bridge, "AndroidBridge")
 
+    val brandHeaderScript = brandHeaderJs(
+        label = appContext.getString(R.string.app_name),
+        accent = String.format("#%06X", appContext.getColor(R.color.ic_launcher_background)),
+    )
+
     val musicPageScripts =
-        VISIBILITY_SPOOF_JS + AD_BLOCK_JS + TAP_HIGHLIGHT_JS + APP_PROMO_CSS +
+        brandHeaderScript + VISIBILITY_SPOOF_JS + AD_BLOCK_JS + TAP_HIGHLIGHT_JS +
             HIDE_OPEN_APP_PROMO_JS + PLAYER_VISIBILITY_JS + AUTO_CONTINUE_JS +
             PLAYER_ARTIST_LINK_JS + HIDE_PREMIUM_UPSELL_JS + SHARE_HIJACK_JS
 

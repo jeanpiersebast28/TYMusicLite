@@ -89,12 +89,7 @@ class PlaybackService : Service() {
         taskRemoved = true
         runWebViewCommand(COMMAND_PAUSE_MEDIA)
         WebViewHolder.detachAndDestroyWebView()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-        } else {
-            @Suppress("DEPRECATION")
-            stopForeground(true)
-        }
+        stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
