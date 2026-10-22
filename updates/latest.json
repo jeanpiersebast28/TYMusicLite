@@ -1,7 +1,7 @@
 {
-  "buildCode": 7,
-  "versionName": "2.11",
-  "apkUrl": "https://github.com/jeanpiersebast28/TYMusicLite/releases/download/v2.11/TYMusicLite2.11.apk",
+  "buildCode": 8,
+  "versionName": "3.0",
+  "apkUrl": "https://github.com/jeanpiersebast28/TYMusicLite/releases/download/v3.0/TYMusicLite3.0.apk",
   "size": 11942526,
-  "notes": "v2.11: la barra superior deja de mostrar el logo de YouTube Music y muestra el icono y el nombre de TYMusic lite. Tocar el logo sigue llevándote al inicio. También se limpió código interno que no se usaba (tema de Compose sin invocar, estilos duplicados, recursos de color huérfanos y una rama inalcanzable por versión de Android) y se corrigieron dos avisos de lint del analizador."
+  "notes": "v3.0: se arregló que la música se reanudara sola después de dejarla reproduciendo 5-30 minutos (un script forzaba la reproducción desde diálogos que ya estaban cerrados y pisaba tu pausa). Ahora pausar respeta tu acción, el botón de play/pausa de la app y de la notificación siempre obedece, y la sesión de Google se guarda al salir de la app para que no tengas que iniciar sesión otra vez."
 }
